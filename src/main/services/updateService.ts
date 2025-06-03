@@ -220,28 +220,41 @@ class UpdateService {
 
   private async getLatestGitHubRelease(): Promise<UpdateInfo | null> {
     try {
-      log.info('Fetching latest release from:', `https://api.github.com/repos/${this.GITHUB_REPO}/releases/latest`);
+      log.info('Fetching releases from:', `https://api.github.com/repos/${this.GITHUB_REPO}/releases`);
       
-      const response = await axios.get(`https://api.github.com/repos/${this.GITHUB_REPO}/releases/latest`, {
+      const response = await axios.get(`https://api.github.com/repos/${this.GITHUB_REPO}/releases`, {
         headers: {
           'Accept': 'application/vnd.github.v3+json',
           'User-Agent': 'icon-maker/' + app.getVersion()
         }
       });
 
-      const release = response.data;
+      const releases = response.data;
+      if (!releases || releases.length === 0) {
+        log.info('No releases found');
+        return null;
+      }
+
+      // Get the latest non-draft, non-prerelease release
+      const latestRelease = releases.find((release: any) => !release.draft && !release.prerelease);
+      if (!latestRelease) {
+        log.info('No stable releases found');
+        return null;
+      }
+
+      log.info('Latest release found:', latestRelease.tag_name);
       return {
-        version: release.tag_name.replace('v', ''),
-        releaseDate: release.published_at,
-        changelog: release.body || 'No changelog available',
-        downloadUrl: release.html_url,
+        version: latestRelease.tag_name.replace('v', ''),
+        releaseDate: latestRelease.published_at,
+        changelog: latestRelease.body || 'No changelog available',
+        downloadUrl: latestRelease.html_url,
         mandatory: false
       };
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        log.error('Failed to fetch GitHub release:', error.response?.data || error.message);
+        log.error('Failed to fetch GitHub releases:', error.response?.data || error.message);
       } else {
-        log.error('Failed to fetch GitHub release:', error);
+        log.error('Failed to fetch GitHub releases:', error);
       }
       return null;
     }
