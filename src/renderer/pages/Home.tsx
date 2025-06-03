@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
 import { Upload, Search, Send, Download, Package, Settings, X, MessageCircle, Check, Minus, Plus, Zap, Palette, Sparkles, Square, Circle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { useIcons } from '../hooks/useIcons';
 
 interface Message {
   id: number;
   type: 'user' | 'bot';
   content: string;
+  iconId?: string;
 }
 
 type SizeKey = '16x16' | '32x32' | '48x48' | '64x64' | '128x128' | '256x256' | '512x512' | '1024x1024';
@@ -23,6 +26,9 @@ interface StyleOptions {
 }
 
 const Home: React.FC = () => {
+  const navigate = useNavigate();
+  const { createIcon, exportIcon } = useIcons();
+  
   const [messages, setMessages] = useState<Message[]>([
     { id: 1, type: 'bot', content: 'Hi! I can help you generate custom icons. Describe what you need and I\'ll create it for you.' }
   ]);
@@ -44,7 +50,7 @@ const Home: React.FC = () => {
     android: false,
     mac: false
   });
-  const [currentIcon, setCurrentIcon] = useState<null>(null);
+  const [currentIcon, setCurrentIcon] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   
   const [styleOptions, setStyleOptions] = useState<StyleOptions>({
@@ -79,23 +85,43 @@ const Home: React.FC = () => {
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
     
-    const styleContext = `Style: ${styleOptions.style}, Colors: ${styleOptions.primaryColor}/${styleOptions.secondaryColor}, Background: ${styleOptions.backgroundStyle}, Complexity: ${styleOptions.iconComplexity}, Corners: ${styleOptions.corners}, Effects: ${styleOptions.effects.join(', ')}, Mood: ${styleOptions.mood}, Theme: ${styleOptions.theme}`;
-    
     const newMessage: Message = { id: Date.now(), type: 'user', content: inputValue };
     setMessages(prev => [...prev, newMessage]);
     setIsGenerating(true);
+    
+    const userInput = inputValue;
     setInputValue('');
     
-    // Simulate AI response
-    setTimeout(() => {
+    // Generate icon
+    const selectedSizesList = Object.entries(selectedSizes)
+      .filter(([_, selected]) => selected)
+      .map(([size]) => size);
+    
+    const icon = await createIcon({
+      prompt: userInput,
+      styleOptions,
+      sizes: selectedSizesList.length > 0 ? selectedSizesList : ['64x64']
+    });
+    
+    if (icon) {
+      setCurrentIcon(icon);
       const botResponse: Message = { 
         id: Date.now() + 1, 
         type: 'bot', 
-        content: `I'll create a ${inputValue} icon with your style preferences: ${styleContext}. Generating now...` 
+        content: `I've created your "${userInput}" icon with ${icon.sizes.length} sizes. You can preview it above or download it using the options on the right.`,
+        iconId: icon.id
       };
       setMessages(prev => [...prev, botResponse]);
-      setIsGenerating(false);
-    }, 1000);
+    } else {
+      const errorResponse: Message = { 
+        id: Date.now() + 1, 
+        type: 'bot', 
+        content: `Sorry, I couldn't generate the icon. Please try again.` 
+      };
+      setMessages(prev => [...prev, errorResponse]);
+    }
+    
+    setIsGenerating(false);
   };
 
   const toggleSize = (size: SizeKey) => {
@@ -140,6 +166,39 @@ const Home: React.FC = () => {
     }));
   };
 
+  const handleExportPackage = async () => {
+    if (!currentIcon) return;
+
+    const selectedPlatformsList = Object.entries(selectedPlatforms)
+      .filter(([_, selected]) => selected)
+      .map(([platform]) => platform);
+
+    if (selectedPlatformsList.length === 0) {
+      alert('Please select at least one platform');
+      return;
+    }
+
+    const filePath = await exportIcon({
+      iconId: currentIcon.id,
+      platforms: selectedPlatformsList,
+      sizes: currentIcon.sizes,
+      format: 'zip'
+    });
+
+    if (filePath) {
+      window.electron.utils.showItemInFolder(filePath);
+    }
+  };
+
+  const getPreviewSizes = () => {
+    if (!currentIcon) return [16, 32, 64, 128];
+    return currentIcon.sizes
+      .map((size: string) => parseInt(size.split('x')[0]))
+      .filter((size: number) => size <= 128)
+      .sort((a: number, b: number) => a - b)
+      .slice(0, 4);
+  };
+
   return (
     <div className="flex flex-col h-full bg-[var(--bg-primary)] relative">
       {/* Header */}
@@ -151,9 +210,12 @@ const Home: React.FC = () => {
           <p className="text-[var(--text-secondary)] mt-2">AI-powered icon creation with smart packaging</p>
         </div>
         <div className="flex gap-3">
-          <button className="btn-secondary flex items-center gap-2">
+          <button 
+            onClick={() => navigate('/my-icons')}
+            className="btn-secondary flex items-center gap-2"
+          >
             <Upload className="w-4 h-4" />
-            Import
+            My Icons
           </button>
         </div>
       </div>
@@ -167,14 +229,42 @@ const Home: React.FC = () => {
             <div className="card">
               <h3 className="text-xl font-semibold text-[var(--text-primary)] mb-4">Icon Preview</h3>
               <div className="grid grid-cols-4 gap-4">
-                {[16, 32, 64, 128].map(size => (
-                  <div key={size} className="aspect-square bg-[var(--bg-secondary)] rounded-xl flex items-center justify-center border border-[var(--border-color)] hover:border-accent transition-colors">
-                    <div className="text-center">
-                      <div className="w-8 h-8 bg-accent rounded-lg mx-auto mb-2"></div>
-                      <span className="text-xs text-[var(--text-secondary)]">{size}px</span>
+                {currentIcon ? (
+                  getPreviewSizes().map((size: number) => {
+                    const sizeKey = `${size}x${size}`;
+                    return (
+                      <div key={size} className="aspect-square bg-[var(--bg-secondary)] rounded-xl flex items-center justify-center border border-[var(--border-color)] hover:border-accent transition-colors p-2">
+                        {currentIcon.formats.png && currentIcon.formats.png[sizeKey] ? (
+                          <img 
+                            src={`data:image/png;base64,${currentIcon.formats.png[sizeKey]}`}
+                            alt={`Icon ${size}px`}
+                            className="w-full h-full object-contain"
+                          />
+                        ) : currentIcon.formats.svg ? (
+                          <div 
+                            className="w-full h-full flex items-center justify-center"
+                            style={{ width: size, height: size }}
+                            dangerouslySetInnerHTML={{ __html: currentIcon.formats.svg }}
+                          />
+                        ) : (
+                          <div className="text-center">
+                            <div className="w-8 h-8 bg-accent rounded-lg mx-auto mb-2"></div>
+                            <span className="text-xs text-[var(--text-secondary)]">{size}px</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  [16, 32, 64, 128].map(size => (
+                    <div key={size} className="aspect-square bg-[var(--bg-secondary)] rounded-xl flex items-center justify-center border border-[var(--border-color)] hover:border-accent transition-colors">
+                      <div className="text-center">
+                        <div className="w-8 h-8 bg-accent rounded-lg mx-auto mb-2"></div>
+                        <span className="text-xs text-[var(--text-secondary)]">{size}px</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 
@@ -242,15 +332,30 @@ const Home: React.FC = () => {
             <div className="card">
               <h3 className="text-xl font-semibold text-[var(--text-primary)] mb-4">Download Options</h3>
               <div className="space-y-3">
-                <button className="btn-primary w-full flex items-center justify-center gap-2">
+                <button 
+                  onClick={handleExportPackage}
+                  disabled={!currentIcon}
+                  className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <Package className="w-5 h-5" />
                   Complete Package ({getSelectedCount()} files)
                 </button>
-                <button className="btn-secondary w-full flex items-center justify-center gap-2">
+                <button 
+                  onClick={() => navigate('/my-icons')}
+                  disabled={!currentIcon}
+                  className="btn-secondary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <Download className="w-5 h-5" />
-                  Individual Downloads
+                  View in My Icons
                 </button>
               </div>
+              {currentIcon && (
+                <div className="mt-4 p-3 bg-[var(--bg-secondary)] rounded-lg">
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Icon saved! You can download individual sizes from My Icons.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Size Selection */}
@@ -298,6 +403,7 @@ const Home: React.FC = () => {
                   onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                   placeholder="Describe your icon: 'Modern shopping cart icon with gradient'"
                   className="w-full pr-24 pl-4 py-3 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border-color)] text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50"
+                  disabled={isGenerating}
                 />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-2">
                   <button 
@@ -309,7 +415,7 @@ const Home: React.FC = () => {
                   </button>
                   <button 
                     onClick={handleSendMessage}
-                    disabled={!inputValue.trim()}
+                    disabled={!inputValue.trim() || isGenerating}
                     className="btn-primary p-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Send className="w-4 h-4" />
