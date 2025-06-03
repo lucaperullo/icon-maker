@@ -28,9 +28,12 @@ class UpdateService {
   private mainWindow?: BrowserWindow;
   private readonly GITHUB_REPO = 'lucaperullo/icon-maker';
   private readonly CHECK_INTERVAL_HOURS = 6; // Check every 6 hours
-  private readonly GITHUB_TOKEN = process.env.GITHUB_TOKEN; // For private repos
 
   constructor() {
+    // Debug logging
+    log.info('UpdateService initialized');
+    log.info('GitHub Repo:', this.GITHUB_REPO);
+    
     this.store = new Store<{ updateSettings: UpdateSettings }>({
       name: 'update-settings',
       defaults: {
@@ -189,68 +192,57 @@ class UpdateService {
         };
       } else {
         if (!silent) {
-          this.notifyRenderer('update-not-available', { currentVersion });
+          this.notifyRenderer('update-not-available', {
+            currentVersion
+          });
         }
 
         return {
           available: false,
-          currentVersion,
-          latestVersion: latestRelease?.version
+          currentVersion
         };
       }
-    } catch (error: any) {
-      log.error('Failed to check for updates:', error);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      log.error('Error checking for updates:', error);
       
       if (!silent) {
-        this.notifyRenderer('update-error', { error: error.message });
+        this.notifyRenderer('update-error', { error: errorMessage });
       }
 
       return {
         available: false,
         currentVersion: app.getVersion(),
-        error: error.message
+        error: errorMessage
       };
     }
   }
 
   private async getLatestGitHubRelease(): Promise<UpdateInfo | null> {
     try {
-      const headers: Record<string, string> = {
-        'User-Agent': `${app.getName()}/${app.getVersion()}`
-      };
-
-      // Add authorization header for private repositories
-      if (this.GITHUB_TOKEN) {
-        headers['Authorization'] = `token ${this.GITHUB_TOKEN}`;
-      }
-
-      const response = await axios.get(
-        `https://api.github.com/repos/${this.GITHUB_REPO}/releases/latest`,
-        {
-          timeout: 10000,
-          headers
+      log.info('Fetching latest release from:', `https://api.github.com/repos/${this.GITHUB_REPO}/releases/latest`);
+      
+      const response = await axios.get(`https://api.github.com/repos/${this.GITHUB_REPO}/releases/latest`, {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'icon-maker/' + app.getVersion()
         }
-      );
+      });
 
       const release = response.data;
-      
       return {
-        version: release.tag_name.replace(/^v/, ''), // Remove 'v' prefix if present
+        version: release.tag_name.replace('v', ''),
         releaseDate: release.published_at,
         changelog: release.body || 'No changelog available',
         downloadUrl: release.html_url,
-        mandatory: release.body?.toLowerCase().includes('[mandatory]') || false
+        mandatory: false
       };
-    } catch (error: any) {
-      log.error('Failed to fetch GitHub release:', error);
-      
-      // Log specific error for private repos
-      if (error.response?.status === 404) {
-        log.error('Repository not found. For private repositories, ensure GITHUB_TOKEN is set.');
-      } else if (error.response?.status === 401) {
-        log.error('Unauthorized access. Check your GITHUB_TOKEN permissions.');
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        log.error('Failed to fetch GitHub release:', error.response?.data || error.message);
+      } else {
+        log.error('Failed to fetch GitHub release:', error);
       }
-      
       return null;
     }
   }

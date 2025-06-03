@@ -33,7 +33,7 @@ jobs:
       - name: Package application
         run: npm run package
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find Windows installer
         id: find-windows-installer

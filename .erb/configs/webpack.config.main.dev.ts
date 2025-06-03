@@ -47,6 +47,10 @@ const configuration: webpack.Configuration = {
     new webpack.DefinePlugin({
       'process.type': '"browser"',
     }),
+
+    new webpack.EnvironmentPlugin({
+      NODE_ENV: 'development',
+    }),
   ],
 
   /**

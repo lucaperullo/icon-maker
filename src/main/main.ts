@@ -7,6 +7,15 @@ import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
 import { setupIpcHandlers } from './ipc/handlers';
 import updateService from './services/updateService';
+import dotenv from 'dotenv';
+
+// Load environment variables from .env file
+dotenv.config();
+
+// Debug logging for environment variables
+log.info('Environment variables loaded:');
+log.info('GH_TOKEN present:', !!process.env.GH_TOKEN);
+log.info('NODE_ENV:', process.env.NODE_ENV);
 
 class AppUpdater {
   constructor() {
