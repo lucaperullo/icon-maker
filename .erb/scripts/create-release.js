@@ -44,11 +44,19 @@ async function createRelease() {
 
     // Check if tag already exists
     try {
+      // Check local tag
       execSync(`git rev-parse ${tagName}`, { stdio: 'ignore' });
-      console.log(`❌ Tag ${tagName} already exists. Please bump version first.`);
+      console.log(`❌ Tag ${tagName} already exists locally. Please bump version first.`);
       process.exit(1);
     } catch (error) {
-      // Tag doesn't exist, which is good
+      // Tag doesn't exist locally, check GitHub
+      try {
+        execSync(`git ls-remote --tags origin ${tagName}`, { stdio: 'ignore' });
+        console.log(`❌ Tag ${tagName} already exists on GitHub. Please bump version first.`);
+        process.exit(1);
+      } catch (error) {
+        // Tag doesn't exist on GitHub either, which is good
+      }
     }
 
     // Generate changelog
