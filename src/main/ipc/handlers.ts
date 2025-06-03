@@ -1,9 +1,9 @@
-// src/main/ipc/handlers.ts
+// src/main/ipc/handlers.ts (Updated with update service integration)
 import { ipcMain, dialog, shell, app } from 'electron';
-import { autoUpdater } from 'electron-updater';
 import iconStore from '../store/iconStore';
 import iconGenerator from '../services/iconGenerator';
 import iconExporter from '../services/iconExporter';
+import updateService from '../services/updateService';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -118,11 +118,86 @@ export function setupIpcHandlers() {
     }
   });
 
+  // Updated Update handlers with new service
+  ipcMain.handle('update:check', async (_, silent = false) => {
+    try {
+      const result = await updateService.checkForUpdates(silent);
+      return { 
+        success: true, 
+        updateAvailable: result.available,
+        currentVersion: result.currentVersion,
+        latestVersion: result.latestVersion,
+        changelog: result.changelog,
+        error: result.error
+      };
+    } catch (error: any) {
+      console.error('Failed to check for updates:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('update:download', async () => {
+    try {
+      const result = await updateService.downloadAndInstallUpdate();
+      return result;
+    } catch (error: any) {
+      console.error('Failed to download update:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('update:install', async () => {
+    try {
+      updateService.quitAndInstall();
+      return { success: true };
+    } catch (error: any) {
+      console.error('Failed to install update:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('update:skip-version', async (_, version) => {
+    try {
+      updateService.skipVersion(version);
+      return { success: true };
+    } catch (error: any) {
+      console.error('Failed to skip version:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('update:settings:get', async () => {
+    try {
+      const settings = updateService.getSettings();
+      return { success: true, settings };
+    } catch (error: any) {
+      console.error('Failed to get update settings:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('update:settings:update', async (_, settings) => {
+    try {
+      updateService.updateSettings(settings);
+      return { success: true };
+    } catch (error: any) {
+      console.error('Failed to update settings:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Settings handlers
   ipcMain.handle('settings:get', async () => {
     try {
       const settings = iconStore.getSettings();
-      return { success: true, settings };
+      const updateSettings = updateService.getSettings();
+      return { 
+        success: true, 
+        settings: {
+          ...settings,
+          updateSettings
+        }
+      };
     } catch (error: any) {
       console.error('Failed to get settings:', error);
       return { success: false, error: error.message };
@@ -131,7 +206,17 @@ export function setupIpcHandlers() {
 
   ipcMain.handle('settings:update', async (_, settings) => {
     try {
-      iconStore.updateSettings(settings);
+      // Separate update settings from other settings
+      const { updateSettings, ...otherSettings } = settings;
+      
+      if (updateSettings) {
+        updateService.updateSettings(updateSettings);
+      }
+      
+      if (Object.keys(otherSettings).length > 0) {
+        iconStore.updateSettings(otherSettings);
+      }
+      
       return { success: true };
     } catch (error: any) {
       console.error('Failed to update settings:', error);
@@ -206,50 +291,6 @@ export function setupIpcHandlers() {
     }
   });
 
-  // Update handlers
-  ipcMain.handle('update:check', async () => {
-    try {
-      // Configure auto-updater
-      autoUpdater.setFeedURL({
-        provider: 'github',
-        owner: 'yourusername',
-        repo: 'icon-maker'
-      });
-
-      const result = await autoUpdater.checkForUpdates();
-      
-      return { 
-        success: true, 
-        updateAvailable: result && result.updateInfo.version !== app.getVersion(),
-        currentVersion: app.getVersion(),
-        newVersion: result?.updateInfo.version
-      };
-    } catch (error: any) {
-      console.error('Failed to check for updates:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('update:download', async () => {
-    try {
-      await autoUpdater.downloadUpdate();
-      return { success: true };
-    } catch (error: any) {
-      console.error('Failed to download update:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle('update:install', async () => {
-    try {
-      autoUpdater.quitAndInstall();
-      return { success: true };
-    } catch (error: any) {
-      console.error('Failed to install update:', error);
-      return { success: false, error: error.message };
-    }
-  });
-
   // Utility handlers
   ipcMain.handle('open:external', async (_, url) => {
     try {
@@ -269,33 +310,5 @@ export function setupIpcHandlers() {
       console.error('Failed to show item in folder:', error);
       return { success: false, error: error.message };
     }
-  });
-
-  // Auto-updater events
-  autoUpdater.on('checking-for-update', () => {
-    console.log('Checking for update...');
-  });
-
-  autoUpdater.on('update-available', (info) => {
-    console.log('Update available:', info);
-  });
-
-  autoUpdater.on('update-not-available', (info) => {
-    console.log('Update not available:', info);
-  });
-
-  autoUpdater.on('error', (err) => {
-    console.error('Error in auto-updater:', err);
-  });
-
-  autoUpdater.on('download-progress', (progressObj) => {
-    let logMessage = 'Download speed: ' + progressObj.bytesPerSecond;
-    logMessage = logMessage + ' - Downloaded ' + progressObj.percent + '%';
-    logMessage = logMessage + ' (' + progressObj.transferred + '/' + progressObj.total + ')';
-    console.log(logMessage);
-  });
-
-  autoUpdater.on('update-downloaded', (info) => {
-    console.log('Update downloaded:', info);
   });
 }

@@ -1,0 +1,124 @@
+# .github/workflows/release.yml
+name: Build and Release
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*' # Triggers on version tags like v1.0.0
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Package application (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package application (macOS)
+        if: matrix.os == 'macos-latest'
+        run: npm run package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false # Disable code signing for now
+
+      - name: Package application (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find Windows installer
+        if: matrix.os == 'windows-latest'
+        id: find-windows-installer
+        run: |
+          $installer = Get-ChildItem -Path "release/build" -Filter "*.exe" | Select-Object -First 1
+          if ($installer) {
+            echo "installer-path=$($installer.FullName)" >> $env:GITHUB_OUTPUT
+            echo "installer-name=IconForge-AI-Setup-${{ github.ref_name }}.exe" >> $env:GITHUB_OUTPUT
+          }
+        shell: powershell
+
+      - name: Find macOS installer
+        if: matrix.os == 'macos-latest'
+        id: find-macos-installer
+        run: |
+          installer=$(find release/build -name "*.dmg" | head -1)
+          if [ -n "$installer" ]; then
+            echo "installer-path=$installer" >> $GITHUB_OUTPUT
+            echo "installer-name=IconForge-AI-${{ github.ref_name }}.dmg" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Find Linux installer
+        if: matrix.os == 'ubuntu-latest'
+        id: find-linux-installer
+        run: |
+          installer=$(find release/build -name "*.AppImage" | head -1)
+          if [ -n "$installer" ]; then
+            echo "installer-path=$installer" >> $GITHUB_OUTPUT
+            echo "installer-name=IconForge-AI-${{ github.ref_name }}.AppImage" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Windows installer to release
+        if: matrix.os == 'windows-latest' && steps.find-windows-installer.outputs.installer-path && github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ${{ steps.find-windows-installer.outputs.installer-path }}
+          asset_name: ${{ steps.find-windows-installer.outputs.installer-name }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload macOS installer to release
+        if: matrix.os == 'macos-latest' && steps.find-macos-installer.outputs.installer-path && github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ${{ steps.find-macos-installer.outputs.installer-path }}
+          asset_name: ${{ steps.find-macos-installer.outputs.installer-name }}
+          asset_content_type: application/octet-stream
+
+      - name: Upload Linux installer to release
+        if: matrix.os == 'ubuntu-latest' && steps.find-linux-installer.outputs.installer-path && github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ${{ steps.find-linux-installer.outputs.installer-path }}
+          asset_name: ${{ steps.find-linux-installer.outputs.installer-name }}
+          asset_content_type: application/octet-stream
+
+      # Alternative: Upload as artifacts if no release event
+      - name: Upload artifacts
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-build
+          path: release/build/

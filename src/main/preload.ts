@@ -1,5 +1,4 @@
-// Disable no-unused-vars, broken for spread args
-/* eslint no-unused-vars: off */
+// src/main/preload.ts (Updated)
 import { contextBridge, ipcRenderer, IpcRendererEvent, shell } from 'electron';
 
 export type Channels = 
@@ -20,9 +19,35 @@ export type Channels =
   | 'update:check'
   | 'update:download'
   | 'update:install'
+  | 'update:skip-version'
+  | 'update:settings:get'
+  | 'update:settings:update'
   | 'open:external'
   | 'show:itemInFolder'
-  | 'dialog:showOpenDialog';
+  | 'dialog:showOpenDialog'
+  | 'update-event'; // For receiving update events
+
+export interface UpdateInfo {
+  available: boolean;
+  currentVersion: string;
+  latestVersion?: string;
+  changelog?: string;
+  mandatory?: boolean;
+  downloadProgress?: {
+    percent: number;
+    transferred: number;
+    total: number;
+    bytesPerSecond: number;
+  };
+}
+
+export interface UpdateSettings {
+  autoCheck: boolean;
+  lastCheckTime: number;
+  checkInterval: number;
+  skipVersion?: string;
+  beta: boolean;
+}
 
 export interface ElectronHandler {
   ipcRenderer: {
@@ -57,15 +82,22 @@ export interface ElectronHandler {
     clear(): Promise<{ success: boolean; error?: string }>;
   };
   update: {
-    check(): Promise<{ 
+    check(silent?: boolean): Promise<{ 
       success: boolean; 
       updateAvailable?: boolean; 
       currentVersion?: string;
-      newVersion?: string;
+      latestVersion?: string;
+      changelog?: string;
       error?: string 
     }>;
     download(): Promise<{ success: boolean; error?: string }>;
     install(): Promise<{ success: boolean; error?: string }>;
+    skipVersion(version: string): Promise<{ success: boolean; error?: string }>;
+    settings: {
+      get(): Promise<{ success: boolean; settings?: UpdateSettings; error?: string }>;
+      update(settings: Partial<UpdateSettings>): Promise<{ success: boolean; error?: string }>;
+    };
+    onEvent(callback: (event: string, data?: any) => void): () => void;
   };
 }
 
@@ -118,9 +150,25 @@ const electronHandler: ElectronHandler = {
     clear: () => ipcRenderer.invoke('data:clear'),
   },
   update: {
-    check: () => ipcRenderer.invoke('update:check'),
+    check: (silent = false) => ipcRenderer.invoke('update:check', silent),
     download: () => ipcRenderer.invoke('update:download'),
     install: () => ipcRenderer.invoke('update:install'),
+    skipVersion: (version) => ipcRenderer.invoke('update:skip-version', version),
+    settings: {
+      get: () => ipcRenderer.invoke('update:settings:get'),
+      update: (settings) => ipcRenderer.invoke('update:settings:update', settings),
+    },
+    onEvent: (callback: (event: string, data?: any) => void) => {
+      const handler = (_: any, { event, data }: { event: string; data?: any }) => {
+        callback(event, data);
+      };
+      
+      ipcRenderer.on('update-event', handler);
+      
+      return () => {
+        ipcRenderer.removeListener('update-event', handler);
+      };
+    },
   },
 };
 

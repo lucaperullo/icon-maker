@@ -1,30 +1,25 @@
-/* eslint global-require: off, no-console: off, promise/always-return: off */
-
-/**
- * This module executes inside of electron's main process. You can start
- * electron renderer process from here and communicate with the other processes
- * through IPC.
- *
- * When running `npm run build` or `npm run build:main`, this file is compiled to
- * `./src/main.js` using webpack. This gives us some performance wins.
- */
+// src/main/main.ts (Updated)
 import path from 'path';
 import { app, BrowserWindow, shell, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
+import { setupIpcHandlers } from './ipc/handlers';
+import updateService from './services/updateService';
 
 class AppUpdater {
   constructor() {
     log.transports.file.level = 'info';
     autoUpdater.logger = log;
-    autoUpdater.checkForUpdatesAndNotify();
+    // Don't auto-check here since we're using our custom update service
+    // autoUpdater.checkForUpdatesAndNotify();
   }
 }
 
 let mainWindow: BrowserWindow | null = null;
 
+// Legacy IPC example (keep for compatibility)
 ipcMain.on('ipc-example', async (event, arg) => {
   const msgTemplate = (pingPong: string) => `IPC test: ${pingPong}`;
   console.log(msgTemplate(arg));
@@ -72,15 +67,22 @@ const createWindow = async () => {
 
     mainWindow = new BrowserWindow({
       show: false,
-      width: 1024,
-      height: 728,
+      width: 1200,
+      height: 800,
+      minWidth: 1000,
+      minHeight: 700,
       icon: getAssetPath('icon.png'),
       webPreferences: {
         preload: app.isPackaged
           ? path.join(__dirname, 'preload.js')
           : path.join(__dirname, '../../.erb/dll/preload.js'),
+        nodeIntegration: false,
+        contextIsolation: true,
       },
     });
+
+    // Set the main window for the update service
+    updateService.setMainWindow(mainWindow);
 
     mainWindow.loadURL(resolveHtmlPath('index.html'));
 
@@ -93,10 +95,16 @@ const createWindow = async () => {
       } else {
         mainWindow.show();
       }
+
+      // Start silent update check after window is ready
+      setTimeout(() => {
+        updateService.checkForUpdates(true);
+      }, 5000); // Wait 5 seconds after app start
     });
 
     mainWindow.on('closed', () => {
       mainWindow = null;
+      updateService.destroy();
     });
 
     const menuBuilder = new MenuBuilder(mainWindow);
@@ -122,6 +130,9 @@ const createWindow = async () => {
  */
 
 app.on('window-all-closed', () => {
+  // Cleanup update service
+  updateService.destroy();
+  
   // Respect the OSX convention of having the application in memory even
   // after all windows have been closed
   if (process.platform !== 'darwin') {
@@ -132,6 +143,9 @@ app.on('window-all-closed', () => {
 app
   .whenReady()
   .then(() => {
+    // Setup IPC handlers
+    setupIpcHandlers();
+    
     createWindow();
     app.on('activate', () => {
       // On macOS it's common to re-create a window in the app when the
@@ -143,3 +157,8 @@ app
     console.error('Failed to initialize app:', error);
     app.quit();
   });
+
+// Handle app updates
+app.on('before-quit', () => {
+  updateService.destroy();
+});
